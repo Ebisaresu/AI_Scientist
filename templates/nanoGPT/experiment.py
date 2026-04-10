@@ -336,14 +336,14 @@ def train(dataset="shakespeare_char", out_dir="run_0", seed_offset=0):
     bias = False  # do we use bias inside LayerNorm and Linear layers?
     # adamw optimizer
     learning_rate = 1e-3 if dataset == "shakespeare_char" else 5e-4
-    max_iters = 300
+    max_iters = 200
     weight_decay = 1e-1
     beta1 = 0.9
     beta2 = 0.99  # make a bit bigger because number of tokens per iter is small
     grad_clip = 1.0  # clip gradients at this value, or disable if == 0.0
     # learning rate decay settings
     decay_lr = True  # whether to decay the learning rate
-    warmup_iters = 100 if dataset == "shakespeare_char" else 200
+    warmup_iters = 100 if dataset == "shakespeare_char" else 100
     lr_decay_iters = max_iters  # make equal to max_iters usually
     min_lr = 1e-4 if dataset == "shakespeare_char" else 5e-5
     # DDP settings

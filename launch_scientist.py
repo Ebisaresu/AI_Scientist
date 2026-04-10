@@ -231,6 +231,7 @@ def do_idea(
         print_time()
         print(f"*Starting Writeup*")
         ## PERFORM WRITEUP
+        writeup_completed = False
         if writeup == "latex":
             writeup_file = osp.join(folder_name, "latex", "template.tex")
             fnames = [exp_file, writeup_file, notes]
@@ -251,18 +252,19 @@ def do_idea(
                 edit_format="diff",
             )
             try:
-                perform_writeup(idea, folder_name, coder, client, client_model, engine=args.engine)
+                print('✅ 論文執筆はスキップされました！')
+                pass  # perform_writeup(idea, folder_name, coder, client, client_model, engine=args.engine)
             except Exception as e:
                 print(f"Failed to perform writeup: {e}")
                 return False
-            print("Done writeup")
+            print("Done writeup (skipped)")
         else:
             raise ValueError(f"Writeup format {writeup} not supported.")
 
         print_time()
         print(f"*Starting Review*")
         ## REVIEW PAPER
-        if writeup == "latex":
+        if writeup == "latex" and writeup_completed:
             try:
                 paper_text = load_paper(f"{folder_name}/{idea['Name']}.pdf")
                 review = perform_review(
@@ -282,7 +284,7 @@ def do_idea(
                 return False
 
         ## IMPROVE WRITEUP
-        if writeup == "latex" and improvement:
+        if writeup == "latex" and improvement and writeup_completed:
             print_time()
             print(f"*Starting Improvement*")
             try:
@@ -360,7 +362,7 @@ if __name__ == "__main__":
     with open(osp.join(base_dir, "ideas.json"), "w") as f:
         json.dump(ideas, f, indent=4)
 
-    novel_ideas = [idea for idea in ideas if idea["novel"]]
+    novel_ideas = [idea for idea in ideas if idea.get("novel", True)]
     # novel_ideas = list(reversed(novel_ideas))
 
     if args.parallel > 0:
