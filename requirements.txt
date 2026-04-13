@@ -19,3 +19,8 @@ tqdm
 # optimization
 pulp
 ortoolpy
+# Visualization
+matplotlib
+os
+glob
+json
