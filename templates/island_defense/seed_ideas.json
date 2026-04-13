@@ -1,0 +1,17 @@
+[
+    {
+        "Name": "discrete_integer_allocation",
+        "Title": "Discrete Integer Programming for Defense Resource Allocation",
+        "Experiment": "Modify the continuous LP model into a Mixed-Integer Linear Programming (MILP) model by changing the decision variables `x` to `Integer`. Continuous variables do not reflect the reality of deploying discrete units (e.g., ships, missile batteries). Evaluate how integer constraints affect the unmitigated risk and solve time."
+    },
+    {
+        "Name": "adjacent_island_network_effect",
+        "Title": "Incorporating Adjacent Island Support and Network Effects",
+        "Experiment": "Define a distance matrix or adjacency list for the islands. Modify the risk calculation constraint so that resources deployed on island A also provide a partial defense bonus (e.g., 20% effectiveness) to an adjacent island B. This encourages strategic clustering of resources at central hubs."
+    },
+    {
+        "Name": "minimax_robust_optimization",
+        "Title": "Minimax Robust Optimization for Worst-Case Threat Scenarios",
+        "Experiment": "Instead of minimizing the sum of expected risks based on fixed probabilities, assume the enemy is adversarial and will attack the most vulnerable island. Introduce an auxiliary variable `Z` representing the maximum unmitigated risk among all islands. Add constraints `Z >= unmitigated_risk[i]` for all `i`, and change the objective to minimize `Z`."
+    }
+]
