@@ -8,113 +8,117 @@ def generate_report(experiment_name, overwrite):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     target_base_dir = os.path.join(script_dir, "results", experiment_name)
     
-    print(f"🔍 検索ベースディレクトリ: {target_base_dir}")
-    
+    print(f"🔍 Searching in: {target_base_dir}")
     if not os.path.exists(target_base_dir):
-        print(f"\n❌ エラー: 指定された実験フォルダ '{experiment_name}' が存在しません。")
+        print(f"\n❌ Error: '{experiment_name}' does not exist.")
         return
 
     result_dirs = glob.glob(os.path.join(target_base_dir, "202*"))
     valid_dirs = [d for d in result_dirs if os.path.exists(os.path.join(d, "ideas.json"))]
             
     if not valid_dirs:
-        print("\n❌ エラー: ideas.json を含む有効な実験フォルダが見つかりませんでした。")
+        print("\n❌ Error: No valid experiment directories found.")
         return
         
-    print(f"\n📂 対象となる実験フォルダ数: {len(valid_dirs)}件\n")
+    client = openai.OpenAI(api_key="ollama", base_url="http://localhost:11434/v1")
 
-    client = openai.OpenAI(
-        api_key="ollama",
-        base_url="http://localhost:11434/v1"
-    )
-
-    # 全フォルダをアルファベット順（古い順）にループ処理
     for target_dir in sorted(valid_dirs):
         dir_name = os.path.basename(target_dir)
         report_path = os.path.join(target_dir, "light_report.md")
 
-        # 上書きモードでなく、既にレポートがある場合はスキップ
         if not overwrite and os.path.exists(report_path):
-            print(f"⏩ スキップ: {dir_name} (既にレポートが存在します)")
+            print(f"⏩ Skipped: {dir_name}")
             continue
 
-        print(f"🎯 レポート生成開始: {dir_name}")
+        print(f"🎯 Generating report for: {dir_name}")
 
-        # 2. アイデア情報の読み込み
+        # 1. Load Idea
         idea_data = {}
-        try:
-            with open(os.path.join(target_dir, "ideas.json"), "r", encoding="utf-8") as f:
-                raw_data = json.load(f)
-                
+        with open(os.path.join(target_dir, "ideas.json"), "r", encoding="utf-8") as f:
+            raw_data = json.load(f)
             if isinstance(raw_data, list):
                 for item in raw_data:
                     if isinstance(item, dict) and item.get("Name") in target_dir:
                         idea_data = item
                         break
-                if not idea_data and len(raw_data) > 0:
-                    idea_data = raw_data[0]
-            elif isinstance(raw_data, dict):
-                idea_data = raw_data
-        except Exception as e:
-            print(f"  [エラー] ideas.json の読み込みに失敗: {e}")
-            continue
+                if not idea_data: idea_data = raw_data[0]
+            else: idea_data = raw_data
 
-        # 3. ログのかき集め
+        # 2. Gather Logs and Code
         experiment_logs = ""
+        main_notes_path = os.path.join(target_dir, "notes.txt")
+        if os.path.exists(main_notes_path):
+            with open(main_notes_path, "r", encoding="utf-8") as f:
+                experiment_logs += "--- [Experiment Notes] ---\n" + f.read() + "\n\n"
+
+        current_code = ""
+        exp_py_path = os.path.join(target_dir, "experiment.py")
+        if os.path.exists(exp_py_path):
+            with open(exp_py_path, "r", encoding="utf-8") as f:
+                current_code = f.read()
+
         run_dirs = sorted(glob.glob(os.path.join(target_dir, "run_*")))
-        
         if run_dirs:
+            experiment_logs += "--- [Final Scores of Each Run] ---\n"
             for run_dir in run_dirs:
-                notes_path = os.path.join(run_dir, "notes.txt")
-                if os.path.exists(notes_path):
-                    with open(notes_path, "r", encoding="utf-8") as f:
-                        experiment_logs += f"\n\n--- 【{os.path.basename(run_dir)} の試行ログ】 ---\n"
-                        experiment_logs += f.read()
-        
-        # ★ハルシネーション（捏造）対策★
-        if not experiment_logs.strip():
-             experiment_logs = "【システムからの警告】詳細な実行ログ（notes.txt）が一つも見つかりませんでした。コードの構文エラー等で実験が途中で異常終了（クラッシュ）した可能性が高いです。成功したと捏造せず、失敗・エラー終了した旨を正直に記載してください。"
+                info_path = os.path.join(run_dir, "final_info.json")
+                if os.path.exists(info_path):
+                    with open(info_path, "r", encoding="utf-8") as f:
+                        experiment_logs += f"[{os.path.basename(run_dir)}]: {f.read()}\n"
 
-        # 4. プロンプト作成
+        if "--- [Final Scores" not in experiment_logs:
+             experiment_logs = "[SYSTEM WARNING] No detailed execution logs (notes.txt or final_info.json) were found. The experiment most likely crashed due to syntax errors. DO NOT hallucinate success; state honestly that the experiment failed."
+
+        # 3. English Prompt for Maximum Accuracy
         prompt = f"""
-        あなたは優秀なデータサイエンティストであり、オペレーションズ・リサーチの専門家です。
-        以下の実験アイデアと実行ログを元に、日本語で簡潔な実験レポートをMarkdown形式で作成してください。
-        
-        # 構成案
-        1. 実験の目的とアイデア（何を解決しようとしたか）
-        2. 実施したアプローチと結果（ログに「警告」がある場合は、エラー終了した旨を正直に記載すること）
-        3. 考察と次のステップ
+        You are an expert Operations Research scientist and data analyst.
+        Based on the provided Python code and experiment logs, write a formal "Technical Report" in Markdown format.
 
-        # 実験データ
-        【タイトル】: {idea_data.get('Title', 'タイトル不明')}
-        【アイデア詳細】: {idea_data.get('Experiment', '詳細不明')}
-        【実験ログ・結果】:
+        # STRICT RULES
+        1. You MUST include the following two exact image links in the "3. Experimental Results" section:
+           - `![Unmitigated Risk](risk_plot.png)`
+           - `![Solve Time](time_plot.png)`
+        2. Quote specific metrics from the "Final Scores of Each Run" to compare the baseline (Run 0) with subsequent runs.
+        3. If the logs contain a SYSTEM WARNING about missing files, state honestly that the experiment failed or crashed. Do not hallucinate success.
+
+        # REPORT STRUCTURE
+        1. Introduction: Background and objective of the experiment.
+        2. Mathematical Formulation: Extract and format the math from the Python code.
+           - Sets and Indices
+           - Parameters
+           - Decision Variables
+           - Objective Function & Constraints (Use LaTeX formatting like `$x_i$` and `$$\min Z$$`, and explain the mathematical meaning of each equation).
+        3. Experimental Results: 
+           - Embed the image links here.
+           - Analyze the numerical changes.
+        4. Conclusion & Future Work
+
+        # EXPERIMENT DATA
+        [Title]: {idea_data.get('Title')}
+        
+        [Code (experiment.py)]:
+        {current_code}
+        
+        [Logs & Results]:
         {experiment_logs}
         """
 
-        # 5. Ollama経由でQwenにリクエスト
         try:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=2000,
-                temperature=0.3
+                max_tokens=3000,
+                temperature=0.2
             )
-            report_text = response.choices[0].message.content
-            
             with open(report_path, "w", encoding="utf-8") as f:
-                f.write(report_text)
-            
-            print(f"  🎉 出力完了: {report_path}")
+                f.write(response.choices[0].message.content)
+            print(f"  🎉 Output complete: {report_path}")
         except Exception as e:
-            print(f"  [エラー] レポート生成中に問題が発生: {e}")
-
-    print("\n✅ すべてのレポート処理が完了しました！")
+            print(f"  [Error]: {e}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="AI-Scientistの実験結果からレポートを一括生成します。")
-    parser.add_argument("--experiment", type=str, default="island_defense", help="対象フォルダ名")
-    parser.add_argument("--overwrite", action="store_true", help="既存のレポートを強制的に上書き生成する")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--experiment", type=str, default="island_defense")
+    parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
-    
     generate_report(args.experiment, args.overwrite)
