@@ -87,7 +87,7 @@ def generate_report(experiment_name, overwrite):
            - Sets and Indices
            - Parameters
            - Decision Variables
-           - Objective Function & Constraints (Use LaTeX formatting like `$x_i$` and `$$\min Z$$`, and explain the mathematical meaning of each equation).
+           - Objective Function & Constraints (Use LaTeX formatting like `$x_i$` and `$$\\min Z$$`, and explain the mathematical meaning of each equation).
         3. Experimental Results: 
            - Embed the image links here.
            - Analyze the numerical changes.

@@ -168,7 +168,7 @@ def do_idea(base_dir, results_dir, idea, model, client, client_model, writeup, i
                     with open(osp.join(folder_name, "light_report.md"), "r", encoding="utf-8") as f:
                         paper_text = f.read()
                         
-                review = perform_review(paper_text, model="gpt-4o-2024-05-13", client=openai.OpenAI(), num_reflections=5, num_fs_examples=1, num_reviews_ensemble=5, temperature=0.1)
+                review = perform_review(paper_text, model="gpt-4o-mini", client=openai.OpenAI(), num_reflections=5, num_fs_examples=1, num_reviews_ensemble=5, temperature=0.1)
                 with open(osp.join(folder_name, "review.txt"), "w") as f:
                     f.write(json.dumps(review, indent=4))
             except Exception as e:
@@ -198,7 +198,7 @@ def do_idea(base_dir, results_dir, idea, model, client, client_model, writeup, i
                         paper_text = f.read()
 
                 # 最終レビューの実行
-                review = perform_review(paper_text, model="gpt-4o-2024-05-13", client=openai.OpenAI(), num_reflections=5, num_fs_examples=1, num_reviews_ensemble=5, temperature=0.1)
+                review = perform_review(paper_text, model="gpt-4o-mini", client=openai.OpenAI(), num_reflections=5, num_fs_examples=1, num_reviews_ensemble=5, temperature=0.1)
                 with open(osp.join(folder_name, "review_improved.txt"), "w") as f:
                     f.write(json.dumps(review))
             except Exception as e:
@@ -233,13 +233,14 @@ if __name__ == "__main__":
     results_dir = osp.join("results", args.experiment)
     
     ideas = generate_ideas(base_dir, client=client, model=client_model, skip_generation=args.skip_idea_generation, max_num_generations=args.num_ideas, num_reflections=NUM_REFLECTIONS)
+    ideas = [idea for idea in ideas if isinstance(idea, dict) and "Name" in idea]
     if not args.skip_novelty_check:
         ideas = check_idea_novelty(ideas, base_dir=base_dir, client=client, model=client_model, engine=args.engine)
 
     with open(osp.join(base_dir, "ideas.json"), "w") as f:
         json.dump(ideas, f, indent=4)
 
-    novel_ideas = [idea for idea in ideas if idea.get("novel", True)]
+    novel_ideas = [idea for idea in ideas if idea.get("novel", True) and "Name" in idea]
 
     if args.parallel > 0:
         print(f"Running {args.parallel} parallel processes")
