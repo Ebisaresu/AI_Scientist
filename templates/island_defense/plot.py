@@ -44,11 +44,10 @@ def plot_results():
     plt.xlabel('Experiment Run')
     plt.ylabel('Unmitigated Risk')
     plt.title('Unmitigated Risk by Run')
-    plt.xticks(rotation=45, ha='right') # ラベルを斜めにして見やすく
-    plt.tight_layout() # はみ出し防止
+    plt.xticks(rotation=45, ha='right') 
+    plt.tight_layout()
     plt.savefig('risk_plot.png')
 
-    # 計算時間のグラフ化
     plt.figure(figsize=(12, 6))
     plt.bar(runs_names, times, color='r')
     plt.xlabel('Experiment Run')

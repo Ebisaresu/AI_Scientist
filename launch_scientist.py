@@ -7,6 +7,7 @@ import os.path as osp
 import shutil
 import sys
 import time
+import subprocess
 import torch
 from aider.coders import Coder
 from aider.io import InputOutput
@@ -21,168 +22,76 @@ from ai_scientist.perform_writeup import perform_writeup, generate_latex
 
 NUM_REFLECTIONS = 3
 
-
 def print_time():
     print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Run AI scientist experiments")
-    parser.add_argument(
-        "--skip-idea-generation",
-        action="store_true",
-        help="Skip idea generation and load existing ideas",
-    )
-    parser.add_argument(
-        "--skip-novelty-check",
-        action="store_true",
-        help="Skip novelty check and use existing ideas",
-    )
-    # add type of experiment (nanoGPT, Boston, etc.)
-    parser.add_argument(
-        "--experiment",
-        type=str,
-        default="nanoGPT",
-        help="Experiment to run AI Scientist on.",
-    )
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="claude-3-5-sonnet-20240620",
-        choices=AVAILABLE_LLMS,
-        help="Model to use for AI Scientist.",
-    )
-    parser.add_argument(
-        "--writeup",
-        type=str,
-        default="latex",
-        choices=["latex"],
-        help="What format to use for writeup",
-    )
-    parser.add_argument(
-        "--parallel",
-        type=int,
-        default=0,
-        help="Number of parallel processes to run. 0 for sequential execution.",
-    )
-    parser.add_argument(
-        "--improvement",
-        action="store_true",
-        help="Improve based on reviews.",
-    )
-    parser.add_argument(
-        "--gpus",
-        type=str,
-        default=None,
-        help="Comma-separated list of GPU IDs to use (e.g., '0,1,2'). If not specified, all available GPUs will be used.",
-    )
-    parser.add_argument(
-        "--num-ideas",
-        type=int,
-        default=50,
-        help="Number of ideas to generate",
-    )
-    parser.add_argument(
-        "--engine",
-        type=str,
-        default="semanticscholar",
-        choices=["semanticscholar", "openalex"],
-        help="Scholar engine to use.",
-    )
+    parser.add_argument("--skip-idea-generation", action="store_true", help="Skip idea generation")
+    parser.add_argument("--skip-novelty-check", action="store_true", help="Skip novelty check")
+    parser.add_argument("--experiment", type=str, default="nanoGPT", help="Experiment to run")
+    parser.add_argument("--model", type=str, default="claude-3-5-sonnet-20240620", choices=AVAILABLE_LLMS)
+    parser.add_argument("--writeup", type=str, default="markdown", choices=["latex", "markdown"])
+    parser.add_argument("--parallel", type=int, default=0)
+    parser.add_argument("--improvement", action="store_true", help="Improve based on reviews.")
+    parser.add_argument("--gpus", type=str, default=None)
+    parser.add_argument("--num-ideas", type=int, default=50)
+    parser.add_argument("--engine", type=str, default="semanticscholar", choices=["semanticscholar", "openalex"])
     return parser.parse_args()
-
 
 def get_available_gpus(gpu_ids=None):
     if gpu_ids is not None:
         return [int(gpu_id) for gpu_id in gpu_ids.split(",")]
     return list(range(torch.cuda.device_count()))
 
-
 def check_latex_dependencies():
-    """
-    Check if required LaTeX dependencies are installed on the system.
-    Returns True if all dependencies are found, False otherwise.
-    """
     import shutil
     import sys
-
     required_dependencies = ['pdflatex', 'chktex']
     missing_deps = []
-
     for dep in required_dependencies:
         if shutil.which(dep) is None:
             missing_deps.append(dep)
-    
-    if False: # missing_deps:
+    if missing_deps:
         print("Error: Required LaTeX dependencies not found:", file=sys.stderr)
         return False
-    
     return True
     
-def worker(
-        queue,
-        base_dir,
-        results_dir,
-        model,
-        client,
-        client_model,
-        writeup,
-        improvement,
-        gpu_id,
-):
+def worker(queue, base_dir, results_dir, model, client, client_model, writeup, improvement, gpu_id):
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     print(f"Worker {gpu_id} started.")
     while True:
         idea = queue.get()
         if idea is None:
             break
-        success = do_idea(
-            base_dir,
-            results_dir,
-            idea,
-            model,
-            client,
-            client_model,
-            writeup,
-            improvement,
-            log_file=True,
-        )
+        success = do_idea(base_dir, results_dir, idea, model, client, client_model, writeup, improvement, log_file=True)
         print(f"Completed idea: {idea['Name']}, Success: {success}")
     print(f"Worker {gpu_id} finished.")
 
-
-def do_idea(
-        base_dir,
-        results_dir,
-        idea,
-        model,
-        client,
-        client_model,
-        writeup,
-        improvement,
-        log_file=False,
-):
-    ## CREATE PROJECT FOLDER
+def do_idea(base_dir, results_dir, idea, model, client, client_model, writeup, improvement, log_file=False):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     idea_name = f"{timestamp}_{idea['Name']}"
     folder_name = osp.join(results_dir, idea_name)
     assert not osp.exists(folder_name), f"Folder {folder_name} already exists."
     destination_dir = folder_name
     shutil.copytree(base_dir, destination_dir, dirs_exist_ok=True)
+    
     with open(osp.join(base_dir, "run_0", "final_info.json"), "r") as f:
         baseline_results = json.load(f)
-    # Check if baseline_results is a dictionary before extracting means
     if isinstance(baseline_results, dict):
         baseline_results = {k: v["means"] for k, v in baseline_results.items()}
+        
     exp_file = osp.join(folder_name, "experiment.py")
     vis_file = osp.join(folder_name, "plot.py")
     notes = osp.join(folder_name, "notes.txt")
+    
     with open(notes, "w") as f:
         f.write(f"# Title: {idea['Title']}\n")
         f.write(f"# Experiment description: {idea['Experiment']}\n")
         f.write(f"## Run 0: Baseline\n")
         f.write(f"Results: {baseline_results}\n")
         f.write(f"Description: Baseline results.\n")
+        
     if log_file:
         original_stdout = sys.stdout
         original_stderr = sys.stderr
@@ -190,14 +99,13 @@ def do_idea(
         log = open(log_path, "a")
         sys.stdout = log
         sys.stderr = log
+        
     try:
         print_time()
         print(f"*Starting idea: {idea_name}*")
-        ## PERFORM EXPERIMENTS
         fnames = [exp_file, vis_file, notes]
-        io = InputOutput(
-            yes=True, chat_history_file=f"{folder_name}/{idea_name}_aider.txt"
-        )
+        io = InputOutput(yes=True, chat_history_file=f"{folder_name}/{idea_name}_aider.txt")
+        
         if model == "deepseek-coder-v2-0724":
             main_model = Model("deepseek/deepseek-coder")
         elif model == "deepseek-reasoner":
@@ -206,14 +114,8 @@ def do_idea(
             main_model = Model("openrouter/meta-llama/llama-3.1-405b-instruct")
         else:
             main_model = Model(model)
-        coder = Coder.create(
-            main_model=main_model,
-            fnames=fnames,
-            io=io,
-            stream=False,
-            use_git=False,
-            edit_format="diff",
-        )
+            
+        coder = Coder.create(main_model=main_model, fnames=fnames, io=io, stream=False, use_git=False, edit_format="diff")
 
         print_time()
         print(f"*Starting Experiments*")
@@ -221,7 +123,6 @@ def do_idea(
             success = perform_experiments(idea, folder_name, coder, baseline_results)
         except Exception as e:
             print(f"Error during experiments: {e}")
-            print(f"Experiments failed for idea {idea_name}")
             return False
 
         if not success:
@@ -230,79 +131,74 @@ def do_idea(
 
         print_time()
         print(f"*Starting Writeup*")
-        ## PERFORM WRITEUP
         writeup_completed = False
-        if writeup == "latex":
+        
+        if writeup == "markdown":
+            print(f"✅ Markdownレポートの自動生成フェーズに移行します: {idea['Name']}")
+            try:
+                exp_name = osp.basename(results_dir)
+                subprocess.run(["python", "generate_light_report.py", "--experiment", exp_name], check=True)
+                writeup_completed = True
+                print("Done writeup (markdown)")
+            except subprocess.CalledProcessError as e:
+                print(f"Failed to generate markdown report: {e}")
+                return False
+        elif writeup == "latex":
             writeup_file = osp.join(folder_name, "latex", "template.tex")
             fnames = [exp_file, writeup_file, notes]
-            if model == "deepseek-coder-v2-0724":
-                main_model = Model("deepseek/deepseek-coder")
-            elif model == "deepseek-reasoner":
-                main_model = Model("deepseek/deepseek-reasoner")
-            elif model == "llama3.1-405b":
-                main_model = Model("openrouter/meta-llama/llama-3.1-405b-instruct")
-            else:
-                main_model = Model(model)
-            coder = Coder.create(
-                main_model=main_model,
-                fnames=fnames,
-                io=io,
-                stream=False,
-                use_git=False,
-                edit_format="diff",
-            )
+            coder = Coder.create(main_model=main_model, fnames=fnames, io=io, stream=False, use_git=False, edit_format="diff")
             try:
-                print('✅ 論文執筆はスキップされました！')
-                pass  # perform_writeup(idea, folder_name, coder, client, client_model, engine=args.engine)
+                perform_writeup(idea, folder_name, coder, client, client_model, engine="semanticscholar")
+                writeup_completed = True
             except Exception as e:
                 print(f"Failed to perform writeup: {e}")
                 return False
-            print("Done writeup (skipped)")
+            print("Done writeup (latex)")
         else:
             raise ValueError(f"Writeup format {writeup} not supported.")
 
         print_time()
         print(f"*Starting Review*")
-        ## REVIEW PAPER
-        if writeup == "latex" and writeup_completed:
+        ## REVIEW PAPER (★MarkdownとLaTeXの両方に対応！)
+        if writeup_completed:
             try:
-                paper_text = load_paper(f"{folder_name}/{idea['Name']}.pdf")
-                review = perform_review(
-                    paper_text,
-                    model="gpt-4o-2024-05-13",
-                    client=openai.OpenAI(),
-                    num_reflections=5,
-                    num_fs_examples=1,
-                    num_reviews_ensemble=5,
-                    temperature=0.1,
-                )
-                # Store the review in separate review.txt file
+                if writeup == "latex":
+                    paper_text = load_paper(f"{folder_name}/{idea['Name']}.pdf")
+                else: # markdownの場合は直接ファイルを読み込む
+                    with open(osp.join(folder_name, "light_report.md"), "r", encoding="utf-8") as f:
+                        paper_text = f.read()
+                        
+                review = perform_review(paper_text, model="gpt-4o-2024-05-13", client=openai.OpenAI(), num_reflections=5, num_fs_examples=1, num_reviews_ensemble=5, temperature=0.1)
                 with open(osp.join(folder_name, "review.txt"), "w") as f:
                     f.write(json.dumps(review, indent=4))
             except Exception as e:
                 print(f"Failed to perform review: {e}")
                 return False
 
-        ## IMPROVE WRITEUP
-        if writeup == "latex" and improvement and writeup_completed:
+        ## IMPROVE WRITEUP (★MarkdownのAider添削に対応！)
+        if improvement and writeup_completed:
             print_time()
             print(f"*Starting Improvement*")
             try:
-                perform_improvement(review, coder)
-                generate_latex(
-                    coder, folder_name, f"{folder_name}/{idea['Name']}_improved.pdf"
-                )
-                paper_text = load_paper(f"{folder_name}/{idea['Name']}_improved.pdf")
-                review = perform_review(
-                    paper_text,
-                    model="gpt-4o-2024-05-13",
-                    client=openai.OpenAI(),
-                    num_reflections=5,
-                    num_fs_examples=1,
-                    num_reviews_ensemble=5,
-                    temperature=0.1,
-                )
-                # Store the review in separate review.txt file
+                if writeup == "latex":
+                    perform_improvement(review, coder)
+                    generate_latex(coder, folder_name, f"{folder_name}/{idea['Name']}_improved.pdf")
+                    paper_text = load_paper(f"{folder_name}/{idea['Name']}_improved.pdf")
+                else: # markdownの改善プロセス
+                    report_file = osp.join(folder_name, "light_report.md")
+                    # AiderにMarkdownレポートファイルを読み込ませる
+                    fnames_md = [exp_file, report_file, notes]
+                    coder_md = Coder.create(main_model=main_model, fnames=fnames_md, io=io, stream=False, use_git=False, edit_format="diff")
+                    
+                    # 査読コメント(review)を元にAiderにMarkdownを直接修正させる
+                    perform_improvement(review, coder_md)
+                    
+                    # 改善されたMarkdownを読み込み直す
+                    with open(report_file, "r", encoding="utf-8") as f:
+                        paper_text = f.read()
+
+                # 最終レビューの実行
+                review = perform_review(paper_text, model="gpt-4o-2024-05-13", client=openai.OpenAI(), num_reflections=5, num_fs_examples=1, num_reviews_ensemble=5, temperature=0.1)
                 with open(osp.join(folder_name, "review_improved.txt"), "w") as f:
                     f.write(json.dumps(review))
             except Exception as e:
@@ -319,101 +215,51 @@ def do_idea(
             sys.stderr = original_stderr
             log.close()
 
-
 if __name__ == "__main__":
     args = parse_arguments()
 
-    # Check available GPUs and adjust parallel processes if necessary
     available_gpus = get_available_gpus(args.gpus)
     if args.parallel > len(available_gpus):
-        print(
-            f"Warning: Requested {args.parallel} parallel processes, but only {len(available_gpus)} GPUs available. Adjusting to {len(available_gpus)}."
-        )
+        print(f"Warning: Requested {args.parallel} parallel processes, adjusting to {len(available_gpus)}.")
         args.parallel = len(available_gpus)
 
     print(f"Using GPUs: {available_gpus}")
 
-    # Check LaTeX dependencies before proceeding
     if args.writeup == "latex" and not check_latex_dependencies():
         sys.exit(1)
 
-    # Create client
     client, client_model = create_client(args.model)
-
     base_dir = osp.join("templates", args.experiment)
     results_dir = osp.join("results", args.experiment)
-    ideas = generate_ideas(
-        base_dir,
-        client=client,
-        model=client_model,
-        skip_generation=args.skip_idea_generation,
-        max_num_generations=args.num_ideas,
-        num_reflections=NUM_REFLECTIONS,
-    )
+    
+    ideas = generate_ideas(base_dir, client=client, model=client_model, skip_generation=args.skip_idea_generation, max_num_generations=args.num_ideas, num_reflections=NUM_REFLECTIONS)
     if not args.skip_novelty_check:
-        ideas = check_idea_novelty(
-            ideas,
-            base_dir=base_dir,
-            client=client,
-            model=client_model,
-            engine=args.engine,
-        )
+        ideas = check_idea_novelty(ideas, base_dir=base_dir, client=client, model=client_model, engine=args.engine)
 
     with open(osp.join(base_dir, "ideas.json"), "w") as f:
         json.dump(ideas, f, indent=4)
 
     novel_ideas = [idea for idea in ideas if idea.get("novel", True)]
-    # novel_ideas = list(reversed(novel_ideas))
 
     if args.parallel > 0:
         print(f"Running {args.parallel} parallel processes")
         queue = multiprocessing.Queue()
-        for idea in novel_ideas:
-            queue.put(idea)
-
+        for idea in novel_ideas: queue.put(idea)
         processes = []
         for i in range(args.parallel):
             gpu_id = available_gpus[i % len(available_gpus)]
-            p = multiprocessing.Process(
-                target=worker,
-                args=(
-                    queue,
-                    base_dir,
-                    results_dir,
-                    args.model,
-                    client,
-                    client_model,
-                    args.writeup,
-                    args.improvement,
-                    gpu_id,
-                ),
-            )
+            p = multiprocessing.Process(target=worker, args=(queue, base_dir, results_dir, args.model, client, client_model, args.writeup, args.improvement, gpu_id))
             p.start()
             time.sleep(150)
             processes.append(p)
-
-        # Signal workers to exit
-        for _ in range(args.parallel):
-            queue.put(None)
-
-        for p in processes:
-            p.join()
-
+        for _ in range(args.parallel): queue.put(None)
+        for p in processes: p.join()
         print("All parallel processes completed.")
     else:
         for idea in novel_ideas:
             print(f"Processing idea: {idea['Name']}")
             try:
-                success = do_idea(
-                    base_dir,
-                    results_dir,
-                    idea,
-                    args.model,
-                    client,
-                    client_model,
-                    args.writeup,
-                    args.improvement,
-                )
+                success = do_idea(base_dir, results_dir, idea, args.model, client, client_model, args.writeup, args.improvement)
                 print(f"Completed idea: {idea['Name']}, Success: {success}")
             except Exception as e:
                 print(f"Failed to evaluate idea {idea['Name']}: {str(e)}")
